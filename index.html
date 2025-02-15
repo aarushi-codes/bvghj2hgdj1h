@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebAR Object Placement</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <style>
+    body { margin: 0; overflow: hidden; }
+    button {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 24px;
+      font-size: 16px;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <button id="start-ar">Start AR</button>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/loaders/GLTFLoader.js"></script>
+
+  <script>
+    // Check for WebXR support
+    if (!navigator.xr) {
+      alert("WebXR not supported in this browser.");
+    }
+
+    const arButton = document.getElementById('start-ar');
+    let scene, camera, renderer;
+    let hitTestSource = null;
+    let xrSession = null;
+    let referenceSpace = null;
+    let objects = [];
+
+    arButton.addEventListener('click', () => {
+      navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test'] })
+        .then(onSessionStarted)
+        .catch(err => console.error("AR session failed", err));
+    });
+
+    function onSessionStarted(session) {
+      xrSession = session;
+      arButton.style.display = 'none';
+
+      renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      session.addEventListener('end', () => {
+        console.log('AR Session ended');
+        arButton.style.display = 'block';
+      });
+
+      renderer.xr.setSession(session);
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+      // Add light to the scene
+      const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+      scene.add(light);
+
+      // Load a 3D Model or create a basic object
+      const loader = new THREE.GLTFLoader();
+      let model;
+      loader.load('https://modelviewer.dev/shared-assets/models/Astronaut.glb', (gltf) => {
+        model = gltf.scene;
+      });
+
+      // Request hit-test source
+      session.requestReferenceSpace('viewer').then((refSpace) => {
+        session.requestHitTestSource({ space: refSpace }).then((source) => {
+          hitTestSource = source;
+        });
+      });
+
+      session.requestReferenceSpace('local').then((refSpace) => {
+        referenceSpace = refSpace;
+        renderer.setAnimationLoop(render);
+      });
+
+      // Tap event to place objects
+      window.addEventListener('click', () => {
+        if (model) {
+          const newObject = model.clone();
+          newObject.position.set(0, 0, -1).applyMatrix4(camera.matrixWorld);
+          scene.add(newObject);
+          objects.push(newObject);
+        } else {
+          // If model fails to load, place a cube
+          const cubeGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+          const cubeMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+          const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+          cube.position.set(0, 0, -1).applyMatrix4(camera.matrixWorld);
+          scene.add(cube);
+          objects.push(cube);
+        }
+      });
+
+      function render(timestamp, frame) {
+        if (frame) {
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const pose = hit.getPose(referenceSpace);
+          }
+        }
+        renderer.render(scene, camera);
+      }
+    }
+  </script>
+</body>
+</html>
